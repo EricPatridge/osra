@@ -412,65 +412,186 @@ FINALIZE:
   return(c == UNKNOWN_CHAR ? 0 : c);
 }
 
-/*
-bool detect_bracket(int x, int y, unsigned char *pic) {
-	Control control;
-	char c1 = 0;
-	job_t job;
-	JOB = &job;
-	job_init(&job);
-	job.cfg.cfilter = (char *) "([{";
+bool detect_square_bracket(unsigned char *pic, int x, int y)
+{
 
-	//job.cfg.cs = 160;
-	//job.cfg.certainty = 80;
-	//job.cfg.dust_size = 1;
-
-	bool res = false;
-
-	job.src.p.x = x;
-	job.src.p.y = y;
-	job.src.p.bpp = 1;
-	job.src.p.p = pic;
-
-	Blob *b = new Blob(0, 0, job.src.p.x, job.src.p.y);
-
-	int count = 0;
-	int zeros = 0;
-	for (int i = 0; i <= y; i++)
-		for (int j = 0; j <= x; j++) {
-			if (pic[i * x + j] == 0) {
-				b->set_bit(y, x, true);
-				count++;
-			} else
-				zeros++;
-		}
-
-	if (count > MIN_CHAR_POINTS && zeros > MIN_CHAR_POINTS) {
-		try {
-			pgm2asc(&job);
-		} catch (...) {
-		}
-		char *l;
-		l = (char *) job.res.linelist.start.next->data;
-		if (l != NULL)
-			c1 = l[0];
-		if (c1 == '(' || c1 == '[' || c1 == '{')
-			res = true;
-		else {
-			char c2 = 0;
-			b->find_holes();
-			Character a(b);
-			a.recognize1(control.charset, Rectangle::Rectangle(a.left(), a.top(), a.right(), a.bottom()));
-			c2 = a.byte_result();
-			if (c2 == '(' || c2 == '[' || c2 == '{')
-				res = true;
-		}
+  int w = -1;
+  for (int j = x / 2; j >= 0 ; j--) 
+    {
+      if (pic[(y / 2) * x + j] == 1)
+	{
+	  w = j;
+	  break;
 	}
+    }
+  int h1 = -1;
+  for (int i = y / 2; i >= 0; i--)
+    {
+      if (pic[i * x + x / 2] == 1)
+	{
+	  h1 = i;
+	  break;
+	}
+    }
+  int h2 = y;
+  for (int i = y / 2; i < y; i++)
+    {
+      if (pic[i * x + x / 2] == 1)
+	{
+	  h2 = i;
+	  break;
+	}
+    }
+  if (w > x /2 + 1 || h1 > y / 4 || (y - h2) > y / 4)
+    return false;
+  int total_vert(0), total_up_hor(0), total_down_hor(0), fill_vert(0), fill_up_hor(0), fill_down_hor(0), total_empty(0), fill_empty(0);
+  
+  for (int i = 0; i < y; i++)
+    {
+      for (int j = 0; j < x; j++) 
+	{
+	  bool fill = (pic[i * x + j] == 1);
+	  if (j <= w)
+	    {
+	      total_vert++;
+	      if (fill)
+		fill_vert++;
+	    }
+	  if (i <= h1)
+	    {
+	      total_up_hor++;
+	      if (fill)
+		fill_up_hor++;
+	    }
+	  if (i >= h2)
+	    {
+	      total_down_hor++;
+	      if (fill)
+		fill_down_hor++;
+	    }
+	  if (j > w && i > h1 && i < h2)
+	    {
+	      total_empty++;
+	      if (fill)
+		fill_empty++;
+	    }
+	}
+    }
 
-	job_free(&job);
-	return (res);
+  if (total_vert == 0 || total_up_hor == 0 || total_down_hor == 0 || total_empty == 0)
+    return false;
+
+  double fill_v = double(fill_vert) / total_vert;
+  double fill_up_h = double(fill_up_hor) / total_up_hor;
+  double fill_down_h = double(fill_down_hor) / total_down_hor;
+  double fill_e = double(fill_empty) / total_empty;
+  if (fill_v > 0.8 && fill_up_h > 0.7 && fill_down_h > 0.7 && fill_e < 0.2)
+    return true;
+  return false;
 }
-*/
+
+bool detect_bracket(int x, int y, unsigned char *pic) 
+{
+  bool res = false;
+  
+  
+#pragma omp critical
+  {
+  char c1 = 0;
+  job_t job;
+  JOB = &job;
+  OCR_JOB = &job;
+  job_init(&job);
+  job_init_image(&job);
+  job.cfg.cfilter = (char *) "([{";
+  
+  //job.cfg.cs = 160;
+  //job.cfg.certainty = 80;
+  //job.cfg.dust_size = 1;
+  
+  job.src.p.x = x;
+  job.src.p.y = y;
+  job.src.p.bpp = 1;
+  job.src.p.p = pic;
+  
+  struct OCRAD_Pixmap *ocrad_pixmap = new OCRAD_Pixmap();
+  unsigned char *ocrad_bitmap = (unsigned char *) malloc(x * y);
+  memset(ocrad_bitmap, 0, x * y);	  
+  ocrad_pixmap->height = y;
+  ocrad_pixmap->width = x;
+  ocrad_pixmap->mode = OCRAD_bitmap;
+  ocrad_pixmap->data = ocrad_bitmap;
+  
+  int count = 0;
+  int zeros = 0;
+  for (int i = 0; i < y; i++)
+    {
+     for (int j = 0; j < x; j++) 
+      {
+	if (pic[i * x + j] == 0) 
+	  {
+	    ocrad_bitmap[i * x + j] = 1;
+	    count++;
+	  } 
+	else
+	  zeros++;
+      }
+   }
+  
+  /*string str;
+  for (int i = 0; i < y; i++)
+    {
+      for (int j = 0; j < x; j++) 
+	{
+	  str += (pic[i * x + j] != 0 ? "#" : ".");
+	}
+      str += "\n";
+    }
+  
+    cout << str << endl;
+  */
+  if (count > MIN_CHAR_POINTS && zeros > MIN_CHAR_POINTS) 
+    {
+      try 
+	{
+	  pgm2asc(&job);
+	} 
+      catch (...) {  }
+      char *l;
+      l = (char *) job.res.linelist.start.next->data;
+      if (l != NULL)
+	c1 = l[0];
+      if (c1 == '(' || c1 == '[' || c1 == '{')
+	res = true;
+      else 
+	{
+          char c2 = osra_ocrad_ocr(ocrad_pixmap, "([{");
+	  if (c2 == '(' || c2 == '[' || c2 == '{')
+	    res = true;
+	}
+    }
+  
+  if (!res)
+    res = detect_square_bracket(ocrad_bitmap, x, y);
+  /*
+  if (res)
+    {
+      
+      cout <<"Found! " << c1<<endl;
+    }
+  */
+    
+  delete ocrad_pixmap; 
+  free(ocrad_bitmap);
+  
+  job_free_image(&job);
+  OCR_JOB = NULL;
+  JOB = NULL;
+}
+
+  return (res);
+}
+
 
 const string fix_atom_name(const string &s, int n, const map<string, string> &fix,
                            const map<string, string> &superatom, bool debug)

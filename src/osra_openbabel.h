@@ -27,6 +27,7 @@
 #include "osra.h"
 #include "osra_segment.h"
 
+
 using namespace std;
 
 // Header: osra_openbabel.h
@@ -48,12 +49,21 @@ struct molecule_statistics_s
   // int: rings56
   //    accumulated number of 5- and 6- rings in molecule
   int rings56;
+  // int: rings456
+  //    accumulated number of 4, 5, and 6-member rings in molecule
+  int rings456;
   // int: num_atoms
   // number of atoms in molecule
   int num_atoms;
 // int: num_bonds
   // number of bonds in molecule
   int num_bonds;
+  // int: num_organic_non_carbon_atoms
+  // number of organic atoms which are not carbon or hydrogen
+  int num_organic_non_carbon_atoms;
+  // int: num_small_angles
+  // number of bond angles smaller than 20 degrees
+  int num_small_angles;
 };
 
 // typedef: molecule_statistics_t
@@ -117,6 +127,7 @@ molecule_statistics_t calculate_molecule_statistics(vector<atom_t> &atom, const 
 //      string containing SMILES, SDF or other representation of the molecule
 const string get_formatted_structure(vector<atom_t> &atom, const vector<bond_t> &bond, int n_bond, const string &format, const string &second_format, molecule_statistics_t &molecule_statistics,
                                      double &confidence, bool show_confidence, double avg_bond_length, double scaled_avg_bond_length, bool show_avg_bond_length, const int * const resolution,
-                                     const int * const page, const box_t * const surrounding_box, const map<string, string> &superatom, int n_letters, bool show_learning, int resolution_iteration, bool verbose);
+                                     const int * const page, const box_t * const surrounding_box, const map<string, string> &superatom, int n_letters, bool show_learning, int resolution_iteration,
+				     bool verbose, const vector <bracket_t>&  brackets);
 
 #endif

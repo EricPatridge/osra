@@ -7,7 +7,7 @@ dnl Follow this link for complete autoconf macro list:
 dnl http://www.gnu.org/software/autoconf/manual/html_node/Autoconf-Macro-Index.html
 dnl
 
-AC_INIT([osra], [2.0.0])
+AC_INIT([osra], [2.1.0])
 AC_PREREQ([2.65])
 
 dnl
@@ -15,9 +15,9 @@ dnl Library version. If library ABI changes, increase the major number.
 dnl
 
 dnl Increment if interfaces have been added, removed or changed:
-AC_SUBST([LIB_MAJOR_VERSION], [1])
+AC_SUBST([LIB_MAJOR_VERSION], [2])
 dnl Increment if source code has changed:
-AC_SUBST([LIB_MINOR_VERSION], [0])
+AC_SUBST([LIB_MINOR_VERSION], [1])
 
 dnl
 dnl Platform detection
@@ -29,6 +29,7 @@ AS_CASE(["$build_os"], [linux*], [build_os="linux"], [darwin*], [build_os="darwi
 
 AC_LANG([C++])
 AX_GNU_LD
+AX_CXX_COMPILE_STDCXX_11([],[optional])
 AC_CXX_HAVE_STL
 
 AS_IF([test "${ac_cv_cxx_have_stl}" != "yes"], [
@@ -153,7 +154,9 @@ AC_ARG_ENABLE(
 
 AS_IF([test "${enable_java}" == "yes"], [
 	AS_IF([test -n "${JAVA_HOME}"], [
-		CPPFLAGS="-I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux -I${JAVA_HOME}/include/win32 ${CPPFLAGS}"
+		CPPFLAGS="-I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux -I${JAVA_HOME}/include/win32 -I${JAVA_HOME}/include/darwin ${CPPFLAGS}"
+	], [
+		CPPFLAGS="-I/usr/lib/jvm/default-java/include ${CPPFLAGS}"
 	])
 
 	dnl Fix for jlong definition in jni.h on Windows
@@ -231,6 +234,15 @@ AX_PROBE_OBLIGATORY_LIBRARY(
 	[custom location of ocradlib.h from OCRAD (optical character recognition program), see http://www.gnu.org/software/ocrad/ocrad.html]
 )
 
+dnl poppler library
+
+AX_PROBE_OBLIGATORY_LIBRARY(
+	[poppler],
+	[poppler/cpp/poppler-document.h],
+	[auto],
+	[custom location of poppler/cpp/poppler-document.h from POPPLER, see http://poppler.freedesktop.org/]
+)
+
 dnl tesseract library (optional)
 
 AC_ARG_WITH(
@@ -265,7 +277,7 @@ dnl openbabel library
 
 AX_PROBE_OBLIGATORY_LIBRARY(
 	[openbabel],
-	[openbabel/mol.h openbabel/obconversion.h openbabel/builder.h openbabel/alias.h],
+	[openbabel/mol.h openbabel/obconversion.h openbabel/builder.h openbabel/alias.h openbabel/stereo/tetrahedral.h],
 	[/usr/include/openbabel-2.0 /usr/local/include/openbabel-2.0],
 	[custom location of openbabel/builder.h from OpenBabel (open source chemistry toolbox), see http://openbabel.sourceforge.net/wiki/Main_Page]
 )
@@ -400,6 +412,47 @@ AS_IF([test "${osra_lib_ocrad}" != "yes"], [
 ])
 
 dnl
+dnl Poppler library
+dnl
+
+osra_lib_poppler=yes
+
+AC_CHECK_LIB([pthread], [sem_init], [], [ac_lib_poppler=no])
+
+dnl These libraries are needed for static linking with poppler:
+AS_IF([test "${enable_static_linking:+set}" == "set"], [
+		AC_CHECK_LIB([z], [inflateEnd], [], [ac_lib_poppler=no])
+		AC_CHECK_LIB([bz2], [BZ2_bzBuffToBuffCompress], [], [ac_lib_poppler=no])
+		AC_CHECK_LIB([png],[png_create_read_struct], [], [ac_lib_poppler=no])
+		AC_CHECK_LIB([iconv], [libiconv_open], [], [ac_lib_poppler=no])
+		AC_CHECK_LIB([expat],[XML_ParserCreate], [], [ac_lib_poppler=no])
+])
+
+AC_CHECK_LIB([freetype], [FT_Init_FreeType], [], [ac_lib_poppler=no])
+AC_CHECK_LIB([fontconfig], [FcInit], [], [ac_lib_poppler=no])
+
+AX_TRY_LINK([poppler poppler-cpp], [
+       #include <string>
+       #include <poppler/cpp/poppler-document.h>
+       #include <poppler/cpp/poppler-page-renderer.h>
+], [
+     std::string input;
+     poppler::document* doc = poppler::document::load_from_file(input);
+     poppler::page_renderer r;
+     int num_pages = doc->pages();
+     for (int i = 0; i < num_pages; i++)
+     {
+	poppler::page* p = doc->create_page(i);
+      	poppler::image im = r.render_page(p);
+      	const char *d = im.const_data();
+     }
+], [], [osra_lib_poppler=no])
+
+AS_IF([test "${osra_lib_poppler}" != "yes"], [
+	AC_MSG_ERROR([POPPLER API check failed; make sure you have installed poppler-devel package or check config.log])
+])
+
+dnl
 dnl Tesseract library (optional)
 dnl
 
@@ -480,72 +533,87 @@ AX_TRY_LINK([openbabel], [
 	#include <openbabel/obconversion.h>
 	#include <openbabel/builder.h>
 	#include <openbabel/alias.h>
+	#include <openbabel/stereo/tetrahedral.h>
 ], [
 	OpenBabel::OBPairData label;
 	OpenBabel::AliasData aliasData;
+	OpenBabel::OBAtomIterator atom_iter;
 	OpenBabel::OBAtom atom;
-	OpenBabel::OBMol mol;
 	OpenBabel::OBBond bond;
 	OpenBabel::OBRing ring;
+	OpenBabel::OBMol mol;
+	OpenBabel::OBStereoFacade facade(&mol);
+	OpenBabel::OBTetrahedralStereo stereo(&mol);
 	OpenBabel::OBConversion conversion;
 
 	label.SetAttribute("");
 	label.SetValue("");
 	
+	aliasData.Expand(mol, 1);
 	aliasData.SetAlias("");
 	aliasData.SetOrigin(OpenBabel::external);
-	aliasData.Expand(mol, 1);
 
-	atom.IsHeteroatom();
+	atom.Clear();
+	atom.GetAtomicNum();
+	atom.GetFormalCharge();
+	atom.GetId();
+	atom.GetParent();
 	atom.IsCarbon();
+	atom.IsChiral();
+	atom.IsHeteroatom();
 	atom.IsNitrogen();
 	atom.IsOxygen();
 	atom.IsSulfur();
-	atom.IsChiral();
-	atom.GetAtomicNum();
-	atom.SetData(&aliasData);
-	atom.GetFormalCharge();
-	atom.SetVector(0, 0, 0);
 	atom.SetAtomicNum(0);
+	atom.SetData(&aliasData);
 	atom.SetFormalCharge(0);
 	atom.SetIdx(0);
-	atom.Clear();
+	atom.SetVector(0, 0, 0);
 
-	mol.NumAtoms();
-	mol.NumBonds();
-	mol.NumRotors();
+	bond.GetBeginAtom();
+	bond.GetBondOrder();
+	bond.GetFlags();
+	bond.IsDouble();
+	bond.IsHash();
+	bond.IsInRing();
+	bond.IsTriple();
+	bond.IsWedge();
+	bond.SetBondOrder(0);
+	bond.UnsetAromatic();
+	bond.UnsetDown();
+	bond.UnsetHash();
+	bond.UnsetUp();
+	bond.UnsetWedge();
+
+	ring.IsAromatic();
+
+	mol.AddBond(0, 0, 0, 0);
+	mol.AssignSpinMultiplicity(false);
+	mol.BeginAtom(atom_iter);
+	mol.BeginModify();
+	mol.ConnectTheDots();
+	std::vector< std::vector<int> > v;
+	mol.ContigFragList(v);
+	mol.EndModify();
+	mol.FindRingAtomsAndBonds();
 	mol.GetAtom(0);
 	mol.GetBond(0);
 	mol.GetFirstAtom();
 	mol.GetSSSR();
 	mol.NewAtom();
-	mol.AddBond(0, 0, 0, 0);
-	mol.AssignSpinMultiplicity(false);
-	mol.SetDimension(0);
-	mol.SetData(&label);
-	std::vector< std::vector<int> > v;
-	mol.ContigFragList(v);
-	mol.ConnectTheDots();
+	mol.NextAtom(atom_iter);
+	mol.NumAtoms();
+	mol.NumBonds();
+	mol.NumRotors();
 	mol.Separate();
+	mol.SetData(&label);
+	mol.SetDimension(0);
 	mol.StripSalts(0);
-	mol.BeginModify();
-	mol.EndModify();
-	mol.FindRingAtomsAndBonds();
 
-	bond.GetBondOrder();
-	bond.GetFlags();
-	bond.SetBondOrder(0);
-	bond.IsInRing();
-	bond.IsDouble();
-	bond.IsTriple();
-	bond.UnsetUp();
-	bond.UnsetDown();
-	bond.UnsetAromatic();
-	bond.UnsetHash();
-	bond.UnsetWedge();
-	bond.GetBeginAtom();
+	facade.HasTetrahedralStereo(0);
+	facade.GetTetrahedralStereo(0);
 
-	ring.IsAromatic();
+	stereo.GetConfig();
 
 	conversion.SetInFormat("");
 	conversion.SetOutFormat("");
